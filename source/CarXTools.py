@@ -1,6 +1,7 @@
+# pyright: reportMissingImports=false, reportInvalidTypeForm=false
 from math import degrees, radians
+import os
 import bpy
-import bmesh
 
 objtypes = [
     "road",
@@ -50,36 +51,65 @@ class CXMap_SetAlpha(bpy.types.Operator):
 
         selected_alpha_type = context.scene.CX_ExpP.alpha_type
 
+        def find_first_node_by_type(nodes, bl_idname):
+            for n in nodes:
+                if getattr(n, "bl_idname", "") == bl_idname:
+                    return n
+            return None
+
         for obj in context.selected_objects:
             for i, mslot in enumerate(obj.material_slots):
-                if i == obj.active_material_index:  # Check if this is the selected material slot
-                    current_prefix = alpha_prefixes.get(selected_alpha_type, "")
+                if i != obj.active_material_index:
+                    continue
 
-                    # Remove all alpha prefixes from the material
-                    for prefix in alpha_prefixes.values():
-                        if mslot.material.name.startswith(prefix):
-                            rename = mslot.material.name.replace(prefix, "", 1)
-                            mslot.material.name = rename
-                            mslot.material.blend_method = "OPAQUE"
-                            ndt = mslot.material.node_tree
-                            if "Image Texture" in ndt.nodes and "Principled BSDF" in ndt.nodes:
-                                tex = ndt.nodes["Image Texture"]
-                                bsdf = ndt.nodes["Principled BSDF"]
-                                for lnk in ndt.links:
-                                    if lnk.from_socket == tex.outputs["Alpha"] and lnk.to_socket == bsdf.inputs["Alpha"]:
-                                        ndt.links.remove(lnk)
-                                        break
+                mat = mslot.material
+                if not mat:
+                    continue
 
-                    if self.enable_alpha and selected_alpha_type != "none":
-                        # If an alpha type is selected, apply it to the material
-                        if not mslot.material.name.startswith(current_prefix):
-                            mslot.material.name = current_prefix + mslot.material.name
-                            mslot.material.blend_method = "BLEND"
-                            ndt = mslot.material.node_tree
-                            if "Image Texture" in ndt.nodes and "Principled BSDF" in ndt.nodes:
-                                tex = ndt.nodes["Image Texture"]
-                                bsdf = ndt.nodes["Principled BSDF"]
+                current_prefix = alpha_prefixes.get(selected_alpha_type, "")
+
+                # Clear any alpha prefix and unlink alpha from nodes
+                for prefix in alpha_prefixes.values():
+                    if mat.name.startswith(prefix):
+                        mat.name = mat.name.replace(prefix, "", 1)
+                        break
+
+                # Work with nodes safely
+                if getattr(mat, "use_nodes", False) and mat.node_tree:
+                    ndt = mat.node_tree
+                    # Remove all existing links from any Image Texture Alpha to Principled Alpha
+                    links_to_remove = []
+                    for lnk in ndt.links:
+                        from_node = getattr(lnk.from_node, "bl_idname", "")
+                        to_node = getattr(lnk.to_node, "bl_idname", "")
+                        if (
+                            from_node == "ShaderNodeTexImage"
+                            and to_node == "ShaderNodeBsdfPrincipled"
+                            and lnk.from_socket.name == "Alpha"
+                            and lnk.to_socket.name == "Alpha"
+                        ):
+                            links_to_remove.append(lnk)
+                    for lnk in links_to_remove:
+                        ndt.links.remove(lnk)
+
+                # Set blend back to opaque by default
+                mat.blend_method = "OPAQUE"
+
+                # Apply new alpha type if enabled
+                if self.enable_alpha and selected_alpha_type != "none":
+                    if not mat.name.startswith(current_prefix):
+                        mat.name = current_prefix + mat.name
+                    mat.blend_method = "BLEND"
+                    if getattr(mat, "use_nodes", False) and mat.node_tree:
+                        ndt = mat.node_tree
+                        bsdf = find_first_node_by_type(ndt.nodes, "ShaderNodeBsdfPrincipled")
+                        tex = find_first_node_by_type(ndt.nodes, "ShaderNodeTexImage")
+                        if bsdf and tex:
+                            try:
                                 ndt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+                            except Exception:
+                                # Socket may be missing or already linked; ignore
+                                pass
 
         return {"FINISHED"}
 
@@ -226,14 +256,48 @@ class CXMap_Export(bpy.types.Operator):
     export_type: bpy.props.StringProperty()
 
     def execute(self, context):
-        filepath = context.scene.CX_ExpP.path + context.scene.CX_ExpP.name
+        # Build a safe output base path and ensure directory exists
+        base_dir = context.scene.CX_ExpP.path or bpy.path.abspath("//")
+        filepath = os.path.join(base_dir, context.scene.CX_ExpP.name)
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         if self.export_type == "obj":
-            bpy.ops.export_scene.obj(
-                filepath=filepath + ".obj",
-                use_selection=False,
-                path_mode=context.scene.CX_ExpP.texexp,
-            )
-            self.report({"INFO"}, "Exported Map")
+            exported = False
+            # Prefer new Blender 4.x OBJ exporter if available
+            try:
+                op = getattr(getattr(bpy.ops, "wm", None), "obj_export", None)
+                if op:
+                    try:
+                        op(
+                            filepath=filepath + ".obj",
+                            export_selected_objects=False,
+                            path_mode=context.scene.CX_ExpP.texexp,
+                        )
+                    except TypeError:
+                        # Alternate signature
+                        op(
+                            filepath=filepath + ".obj",
+                            use_selection=False,
+                            path_mode=context.scene.CX_ExpP.texexp,
+                        )
+                    exported = True
+            except Exception:
+                pass
+
+            # Fallback to legacy exporter
+            if not exported:
+                try:
+                    bpy.ops.export_scene.obj(
+                        filepath=filepath + ".obj",
+                        use_selection=False,
+                        path_mode=context.scene.CX_ExpP.texexp,
+                    )
+                    exported = True
+                except Exception as e:
+                    self.report({"ERROR"}, f"OBJ export failed: {e}")
+                    return {"CANCELLED"}
+
+            if exported:
+                self.report({"INFO"}, "Exported Map")
         else:
             spawns = []
             cameras = []

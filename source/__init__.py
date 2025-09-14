@@ -1,9 +1,12 @@
+# pyright: reportMissingImports=false
 # Blender Add-on Metadata
 bl_info = {
     "name": "7xeh's CarX Tools",
-    "version": (1, 0, 0),
-    "blender": (3, 6, 1),
+    "version": (1, 1, 0),
+    # Minimum Blender version supported (tested on Blender 4.2 LTS)
+    "blender": (4, 0, 0),
     "author": "7xeh",
+    "description": "Tools for preparing CarX maps: physics prefixes, alpha setup, placeholders, and OBJ export with extra data.",
     "location": "View3D",
     "category": "Development",
 }
