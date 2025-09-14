@@ -3,7 +3,7 @@
 
 This is an updated version of an addon based on [Blender CarX Mod Tools](https://github.com/Zi9/Blender-CarX-Mod-Tools)
 
-This version adds diffrent alpha changes instad of just one. (Dropdown Vs None)
+This version adds diffrent alpha types instad of just one.
 
 
 ## Installation
