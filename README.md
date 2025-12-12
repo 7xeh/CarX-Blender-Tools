@@ -5,6 +5,8 @@ This is an updated version of an addon based on [Blender CarX Mod Tools](https:/
 
 This version adds diffrent alpha types instad of just one.
 
+Tested/targeted for Blender 5.0.
+
 
 ## Installation
 

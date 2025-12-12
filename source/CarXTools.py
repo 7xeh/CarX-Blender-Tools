@@ -524,9 +524,10 @@ def register():
 
 
 def unregister():
-    for cls in classes:
+    if hasattr(bpy.types.Scene, "CX_ExpP"):
+        del bpy.types.Scene.CX_ExpP
+    for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-    del bpy.types.Scene.CX_ExpP
 
 
 if __name__ == "__main__":
